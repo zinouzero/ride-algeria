@@ -26,8 +26,6 @@ jobs:
           test -f ride-algeria-source.zip || (echo "Missing ride-algeria-source.zip in repository root" && exit 1)
           unzip -q ride-algeria-source.zip
           test -f ride_algeria_full_stack/passenger_app/pubspec.yaml || (echo "Passenger Flutter project not found at expected archive path" && exit 1)
-      - name: Enable email OTP login
-        run: python3 scripts/enable_email_auth.py ride_algeria_full_stack/passenger_app/lib/main.dart
       - name: Check release configuration
         env:
           SUPABASE_URL: https://neztjanpcwevsslrizns.supabase.co
@@ -39,6 +37,8 @@ jobs:
       - name: Generate Android project
         working-directory: ride_algeria_full_stack/passenger_app
         run: flutter create --platforms=android --org dz.ridealgeria .
+      - name: Enable email magic-link login
+        run: python3 scripts/enable_email_auth.py ride_algeria_full_stack/passenger_app/lib/main.dart ride_algeria_full_stack/passenger_app/android/app/src/main/AndroidManifest.xml
       - name: Patch Android permissions
         run: |
           python3 - <<'PY'
