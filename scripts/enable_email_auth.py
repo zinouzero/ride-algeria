@@ -388,3 +388,64 @@ if "\n  http:" not in pub:
     pub = pub.replace("  geolocator: ^14.1.2", "  geolocator: ^14.1.2\n  http: ^1.5.0")
 pubspec_path.write_text(pub, encoding="utf-8")
 print("Precise GPS and explicit OpenStreetMap place search configured.")
+
+
+# Add a direct Google Maps directions hand-off for the selected destination.
+map_source = source_path.read_text(encoding="utf-8")
+if "package:url_launcher/url_launcher.dart" not in map_source:
+    map_source = map_source.replace(
+        "import 'package:http/http.dart' as http;",
+        "import 'package:http/http.dart' as http;\nimport 'package:url_launcher/url_launcher.dart';",
+    )
+if "Future<void> openInGoogleMaps()" not in map_source:
+    anchor = "  Future<void> openQuotes() async {"
+    route_method = r'''  Future<void> openInGoogleMaps() async {
+    if (dropoff == null) {
+      if (mounted) setState(() => error = 'اختار المكان من نتائج البحث أولاً.');
+      return;
+    }
+    try {
+      if (pickup == null) await locate();
+      final destination = dropoff!.latitude.toString() + ',' + dropoff!.longitude.toString();
+      final params = <String, String>{
+        'api': '1',
+        'destination': destination,
+        'travelmode': 'driving',
+      };
+      if (pickup != null) {
+        params['origin'] = pickup!.latitude.toString() + ',' + pickup!.longitude.toString();
+      }
+      final uri = Uri.https('www.google.com', '/maps/dir/', params);
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) setState(() => error = 'تعذر فتح Google Maps. تأكد من تثبيته أو افتح المتصفح.');
+    } catch (_) {
+      if (mounted) setState(() => error = 'تعذر فتح الطريق. تحقق من الاتصال وحاول مجدداً.');
+    }
+  }
+'''
+    if anchor not in map_source:
+        raise SystemExit("Could not find BookingScreen openQuotes insertion point")
+    map_source = map_source.replace(anchor, route_method + anchor, 1)
+
+if "الطريق إلى المكان في Google Maps" not in map_source:
+    anchor = "        if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: Colors.red))),"
+    button = """        if (dropoff != null) ...[
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: openInGoogleMaps,
+            icon: const Icon(Icons.directions),
+            label: const Text('الطريق إلى المكان في Google Maps'),
+          ),
+        ],
+"""
+    if anchor not in map_source:
+        raise SystemExit("Could not find BookingScreen error display insertion point")
+    map_source = map_source.replace(anchor, button + anchor, 1)
+
+source_path.write_text(map_source, encoding="utf-8")
+pubspec_path = source_path.parent.parent / "pubspec.yaml"
+pub = pubspec_path.read_text(encoding="utf-8")
+if "\n  url_launcher:" not in pub:
+    pub = pub.replace("  http: ^1.5.0", "  http: ^1.5.0\n  url_launcher: ^6.3.2")
+pubspec_path.write_text(pub, encoding="utf-8")
+print("Place search selection and Google Maps directions action configured.")
