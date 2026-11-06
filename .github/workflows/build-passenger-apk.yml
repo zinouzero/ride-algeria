@@ -51,9 +51,9 @@ jobs:
               "android.permission.ACCESS_FINE_LOCATION",
               "android.permission.POST_NOTIFICATIONS",
           ]
-          additions = "\\n".join(f'    <uses-permission android:name="{item}" />' for item in permissions)
+          additions = "\n".join(f'    <uses-permission android:name="{item}" />' for item in permissions)
           if "android.permission.ACCESS_FINE_LOCATION" not in content:
-              content = content.replace("<application", additions + "\\n    <application", 1)
+              content = content.replace("<application", additions + "\n    <application", 1)
           if "android:usesCleartextTraffic" not in content:
               content = content.replace("<application", '<application android:usesCleartextTraffic="false"', 1)
           manifest.write_text(content, encoding="utf-8")
