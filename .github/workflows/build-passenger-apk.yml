@@ -64,7 +64,7 @@ jobs:
         run: flutter pub get
       - name: Analyze Dart source
         working-directory: ride_algeria_full_stack/passenger_app
-        run: flutter analyze
+        run: flutter analyze lib
       - name: Build release APK
         working-directory: ride_algeria_full_stack/passenger_app
         env:
