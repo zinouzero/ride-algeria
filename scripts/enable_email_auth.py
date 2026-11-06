@@ -225,3 +225,166 @@ if 'com.ridealgeria.mashwari' not in xml:
     xml = xml.replace('</activity>', intent + '        </activity>', 1)
 manifest_path.write_text(xml, encoding='utf-8')
 print('Email/password authentication, password recovery, and persisted Supabase session configured.')
+
+
+# Improve GPS precision and provide explicit free OpenStreetMap place search.
+app_root = source_path.parent.parent
+pubspec_path = app_root / "pubspec.yaml"
+map_source = source_path.read_text(encoding="utf-8")
+if "import 'dart:convert';" not in map_source:
+    map_source = map_source.replace("import 'dart:async';", "import 'dart:async';\nimport 'dart:convert';\nimport 'package:http/http.dart' as http;")
+
+old_search = """  Future<void> searchPlaces(String query) async {
+    searchTimer?.cancel();
+    if (query.trim().length < 2) { setState(() => suggestions = []); return; }
+    searchTimer = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final result = await Supabase.instance.client.functions.invoke('search-places', body: {'query': query.trim()});
+        final rows = (result.data as Map)['places'] as List? ?? [];
+        if (mounted) setState(() => suggestions = rows.cast<Map<String,dynamic>>());
+      } catch (_) { if (mounted) setState(() => suggestions = []); }
+    });
+  }
+"""
+new_search = r'''  final Map<String, List<Map<String,dynamic>>> _placeSearchCache = {};
+  DateTime? _lastPlaceSearchAt;
+  Future<void> searchPlaces(String query) async {
+    searchTimer?.cancel();
+    final term = query.trim();
+    if (term.length < 2) { if (mounted) setState(() => suggestions = []); return; }
+    searchTimer = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      setState(() { error = null; suggestions = []; });
+      final cacheKey = term.toLowerCase();
+      final cached = _placeSearchCache[cacheKey];
+      if (cached != null) { if (mounted) setState(() => suggestions = cached); return; }
+      try {
+        // Nominatim public service: explicit searches only, not keystroke autocomplete.
+        final last = _lastPlaceSearchAt;
+        if (last != null) {
+          final wait = const Duration(milliseconds: 1100) - DateTime.now().difference(last);
+          if (wait > Duration.zero) await Future<void>.delayed(wait);
+        }
+        _lastPlaceSearchAt = DateTime.now();
+        final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+          'format': 'jsonv2', 'q': term + ', Algeria', 'countrycodes': 'dz',
+          'limit': '8', 'addressdetails': '1', 'accept-language': 'ar,fr,en',
+        });
+        final response = await http.get(uri, headers: {
+          'User-Agent': 'MashwariPassenger/1.0 (Android; OpenStreetMap search)',
+          'Accept': 'application/json',
+        }).timeout(const Duration(seconds: 15));
+        if (response.statusCode != 200) throw Exception('خدمة البحث عن الأماكن غير متاحة حالياً.');
+        final raw = jsonDecode(response.body);
+        if (raw is! List) throw Exception('نتيجة البحث غير صالحة.');
+        final rows = raw.whereType<Map>().where((p) => p['lat'] != null && p['lon'] != null)
+          .map((p) => <String,dynamic>{
+            'label': (p['name']?.toString().trim().isNotEmpty == true ? p['name'].toString() + ', ' : '') + (p['display_name']?.toString() ?? 'مكان'),
+            'latitude': double.tryParse(p['lat'].toString()),
+            'longitude': double.tryParse(p['lon'].toString()),
+            'type': p['type']?.toString() ?? '',
+          }).where((p) => p['latitude'] != null && p['longitude'] != null).toList();
+        _placeSearchCache[cacheKey] = rows;
+        if (mounted) setState(() => suggestions = rows);
+        if (rows.isEmpty && mounted) setState(() => error = 'ما لقيناش نتائج. جرّب اسم المكان أو الحي بالفرنسية أو العربية.');
+      } catch (e) {
+        if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', 'تعذر البحث عن المكان: '));
+      }
+    });
+  }
+'''
+if old_search in map_source:
+    map_source = map_source.replace(old_search, new_search)
+elif "nominatim.openstreetmap.org" not in map_source:
+    raise SystemExit("Original place search function not found")
+
+old_locate = """  Future<void> locate() async {
+    setState(() { locating = true; error = null; });
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) throw Exception('فعّل خدمة تحديد الموقع في الهاتف.');
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) throw Exception('يلزم السماح بالوصول إلى الموقع.');
+      final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+      final point = LatLng(pos.latitude, pos.longitude);
+      setState(() { pickup = point; selectingPickup = false; pickupLabel = 'موقعي الحالي'; });
+      mapController.move(point, 15);
+    } catch (e) { setState(() => error = e.toString().replaceFirst('Exception: ', '')); }
+    finally { if (mounted) setState(() => locating = false); }
+  }
+"""
+new_locate = r'''  Future<void> locate() async {
+    if (mounted) setState(() { locating = true; error = null; });
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) throw Exception('فعّل خدمة تحديد الموقع GPS في الهاتف.');
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) throw Exception('اسمح لمشواري بالوصول إلى الموقع أثناء الاستخدام.');
+      final permissionAccuracy = await Geolocator.getLocationAccuracy();
+      if (permissionAccuracy == LocationAccuracyStatus.reduced) {
+        throw Exception('صلاحية الموقع التقريبي مفعّلة. افتح إعدادات التطبيق > الأذونات > الموقع، واختر السماح بالموقع الدقيق.');
+      }
+      Position? best;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        final pos = await Geolocator.getCurrentPosition(locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 0,
+          timeLimit: const Duration(seconds: 20),
+        ));
+        if (best == null || pos.accuracy < best.accuracy) best = pos;
+        if (best.accuracy <= 20) break;
+        if (attempt == 0) await Future<void>.delayed(const Duration(seconds: 2));
+      }
+      if (best == null) throw Exception('تعذر الحصول على موقع GPS. حاول في مكان مفتوح.');
+      final point = LatLng(best.latitude, best.longitude);
+      final accuracy = best.accuracy.round();
+      if (!mounted) return;
+      setState(() {
+        pickup = point;
+        selectingPickup = false;
+        pickupLabel = 'موقعي الحالي • دقة تقريباً ±' + accuracy.toString() + 'م';
+        if (accuracy > 50) error = 'إشارة GPS ضعيفة (±' + accuracy.toString() + 'م). جرّب الخروج لمكان مفتوح أو فعّل الموقع الدقيق.';
+      });
+      mapController.move(point, 18);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
+    } finally { if (mounted) setState(() => locating = false); }
+  }
+'''
+if old_locate in map_source:
+    map_source = map_source.replace(old_locate, new_locate)
+elif "LocationAccuracy.bestForNavigation" not in map_source:
+    raise SystemExit("Original GPS function not found")
+
+old_field = """TextField(controller: destinationSearch, onChanged: searchPlaces, decoration: const InputDecoration(
+          labelText: 'ابحث عن الوجهة أو اخترها من الخريطة', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true)),"""
+new_field = """TextField(controller: destinationSearch, onSubmitted: searchPlaces, decoration: InputDecoration(
+          labelText: 'ابحث عن عيادة أو عنوان أو مكان', prefixIcon: const Icon(Icons.search), border: const OutlineInputBorder(), isDense: true,
+          suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => searchPlaces(destinationSearch.text)))),"""
+if old_field in map_source:
+    map_source = map_source.replace(old_field, new_field)
+elif "onSubmitted: searchPlaces" not in map_source:
+    raise SystemExit("Original destination search field not found")
+
+old_markers = """          MarkerLayer(markers: [if (pickup != null) Marker(point: pickup!, width: 42, height: 42, child: const Icon(Icons.my_location, color: Colors.blue, size: 34)),
+            if (dropoff != null) Marker(point: dropoff!, width: 42, height: 42, child: const Icon(Icons.location_on, color: Colors.red, size: 38))]),"""
+new_markers = """          MarkerLayer(markers: [
+            if (pickup != null) Marker(point: pickup!, width: 42, height: 42, child: const Icon(Icons.my_location, color: Colors.blue, size: 34)),
+            if (dropoff != null) Marker(point: dropoff!, width: 42, height: 42, child: const Icon(Icons.location_on, color: Colors.red, size: 38)),
+            ...suggestions.where((p) => p['latitude'] is num && p['longitude'] is num).map((p) => Marker(
+              point: LatLng((p['latitude'] as num).toDouble(), (p['longitude'] as num).toDouble()),
+              width: 38, height: 38,
+              child: GestureDetector(onTap: () => choosePlace(p), child: const Icon(Icons.place, color: Colors.deepOrange, size: 34)),
+            )),
+          ]),"""
+if old_markers in map_source:
+    map_source = map_source.replace(old_markers, new_markers)
+elif "suggestions.where((p)" not in map_source:
+    raise SystemExit("Original marker layer not found")
+
+source_path.write_text(map_source, encoding="utf-8")
+pub = pubspec_path.read_text(encoding="utf-8")
+if "\n  http:" not in pub:
+    pub = pub.replace("  geolocator: ^14.1.2", "  geolocator: ^14.1.2\n  http: ^1.5.0")
+pubspec_path.write_text(pub, encoding="utf-8")
+print("Precise GPS and explicit OpenStreetMap place search configured.")
