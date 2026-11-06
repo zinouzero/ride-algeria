@@ -16,7 +16,7 @@ source = source.replace(
 source = source.replace("? const PhoneLoginScreen() : const BookingScreen(),", "? const EmailLoginScreen() : const BookingScreen(),")
 
 start_marker = "class PhoneLoginScreen extends StatefulWidget {"
-end_marker = "\\nclass BookingScreen extends StatefulWidget"
+end_marker = "\nclass BookingScreen extends StatefulWidget"
 if start_marker in source:
     start = source.index(start_marker)
     end = source.index(end_marker, start)
