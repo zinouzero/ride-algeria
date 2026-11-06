@@ -1,25 +1,22 @@
 from pathlib import Path
 import sys
 
-if len(sys.argv) != 2:
-    raise SystemExit("Usage: enable_email_auth.py path/to/passenger_app/lib/main.dart")
+if len(sys.argv) != 3:
+    raise SystemExit("Usage: enable_email_auth.py path/to/main.dart path/to/AndroidManifest.xml")
 
 path = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
 if not path.is_file():
     raise SystemExit(f"Passenger app entrypoint not found: {path}")
 source = path.read_text(encoding="utf-8")
-
 source = source.replace(
     "await Supabase.initialize(url: supabaseUrl, anonKey: supabasePublishableKey);",
     "await Supabase.initialize(url: supabaseUrl, publishableKey: supabasePublishableKey);",
 )
-source = source.replace(
-    "? const PhoneLoginScreen() : const BookingScreen(),",
-    "? const EmailLoginScreen() : const BookingScreen(),",
-)
+source = source.replace("? const PhoneLoginScreen() : const BookingScreen(),", "? const EmailLoginScreen() : const BookingScreen(),")
 
 start_marker = "class PhoneLoginScreen extends StatefulWidget {"
-end_marker = "\nclass BookingScreen extends StatefulWidget"
+end_marker = "\\nclass BookingScreen extends StatefulWidget"
 if start_marker in source:
     start = source.index(start_marker)
     end = source.index(end_marker, start)
@@ -31,48 +28,37 @@ if start_marker in source:
 
 class _EmailLoginScreenState extends State<EmailLoginScreen> {
   final email = TextEditingController();
-  final code = TextEditingController();
   bool sent = false, busy = false;
   String? error;
 
   Future<void> submit() async {
     final address = email.text.trim();
-    if (!sent && (address.isEmpty || !address.contains('@'))) {
+    if (address.isEmpty || !address.contains('@')) {
       setState(() => error = 'أدخل عنوان بريد إلكتروني صحيح.');
-      return;
-    }
-    if (sent && code.text.trim().length < 6) {
-      setState(() => error = 'أدخل رمز التحقق المكوّن من 6 أرقام.');
       return;
     }
     setState(() { busy = true; error = null; });
     try {
-      final auth = Supabase.instance.client.auth;
-      if (!sent) {
-        await auth.signInWithOtp(email: address);
-        if (mounted) setState(() => sent = true);
-      } else {
-        await auth.verifyOTP(
-          email: address,
-          token: code.text.trim(),
-          type: OtpType.email,
-        );
-      }
+      await Supabase.instance.client.auth.signInWithOtp(
+        email: address,
+        emailRedirectTo: 'com.ridealgeria.mashwari://login-callback',
+      );
+      if (mounted) setState(() => sent = true);
     } on AuthException catch (e) {
       if (mounted) setState(() => error = e.message);
     } catch (_) {
-      if (mounted) setState(() => error = 'تعذر إكمال تسجيل الدخول. تحقق من الاتصال وحاول مجدداً.');
+      if (mounted) setState(() => error = 'تعذر إرسال رابط الدخول. تحقق من الاتصال وحاول مجدداً.');
     } finally {
       if (mounted) setState(() => busy = false);
     }
   }
 
   void changeEmail() {
-    setState(() { sent = false; code.clear(); error = null; });
+    setState(() { sent = false; error = null; });
   }
 
   @override
-  void dispose() { email.dispose(); code.dispose(); super.dispose(); }
+  void dispose() { email.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -85,7 +71,7 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
           const Text('مرحبا بك في مشواري', textAlign: TextAlign.center,
             style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          Text(sent ? 'أدخل رمز التحقق الذي أرسلناه إلى بريدك الإلكتروني' : 'سجّل ببريدك الإلكتروني للمتابعة', textAlign: TextAlign.center),
+          Text(sent ? 'أرسلنا رابط الدخول إلى بريدك. افتحه لإكمال تسجيل الدخول.' : 'سجّل ببريدك الإلكتروني للمتابعة', textAlign: TextAlign.center),
           const SizedBox(height: 28),
           TextField(controller: email, enabled: !sent,
             keyboardType: TextInputType.emailAddress, textDirection: TextDirection.ltr,
@@ -93,19 +79,14 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
             decoration: const InputDecoration(labelText: 'البريد الإلكتروني', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email_outlined))),
           if (sent) ...[
             const SizedBox(height: 12),
-            TextField(controller: code, keyboardType: TextInputType.number,
-              textDirection: TextDirection.ltr, maxLength: 6,
-              autofillHints: const [AutofillHints.oneTimeCode],
-              decoration: const InputDecoration(labelText: 'رمز التحقق (6 أرقام)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock_outline))),
-            Align(alignment: Alignment.centerLeft,
-              child: TextButton(onPressed: busy ? null : changeEmail, child: const Text('تغيير البريد الإلكتروني'))),
+            TextButton(onPressed: busy ? null : changeEmail, child: const Text('تغيير البريد الإلكتروني')),
           ],
           if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red))),
           const SizedBox(height: 18),
           FilledButton(onPressed: busy ? null : submit,
-            child: Text(busy ? 'يرجى الانتظار...' : sent ? 'تأكيد الرمز' : 'إرسال رمز إلى البريد')),
+            child: Text(busy ? 'يرجى الانتظار...' : sent ? 'إعادة إرسال رابط الدخول' : 'إرسال رابط الدخول إلى البريد')),
           const SizedBox(height: 14),
-          const Text('لن تحتاج إلى رقم هاتف أو رسائل SMS لتسجيل الدخول.', textAlign: TextAlign.center,
+          const Text('افتح رسالة مشواري في بريدك واضغط رابط تسجيل الدخول. لن تحتاج إلى SMS.', textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: Colors.black54)),
         ]),
       ),
@@ -123,8 +104,24 @@ source = source.replace(
 )
 if "const PhoneLoginScreen()" in source or "signInWithOtp(phone:" in source:
     raise SystemExit("Phone login references remain after patch")
-if "signInWithOtp(email: address)" not in source or "OtpType.email" not in source:
-    raise SystemExit("Email OTP implementation verification failed")
-
+if "emailRedirectTo:" not in source or "com.ridealgeria.mashwari://login-callback" not in source:
+    raise SystemExit("Email magic-link implementation verification failed")
 path.write_text(source, encoding="utf-8")
-print(f"Email OTP login enabled in {path}")
+
+if not manifest.is_file():
+    raise SystemExit(f"Generated Android manifest not found: {manifest}")
+xml = manifest.read_text(encoding="utf-8")
+intent = """
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.ridealgeria.mashwari" android:host="login-callback" />
+            </intent-filter>
+"""
+if "com.ridealgeria.mashwari" not in xml:
+    if "</activity>" not in xml:
+        raise SystemExit("Generated Android manifest has no activity element")
+    xml = xml.replace("</activity>", intent + "        </activity>", 1)
+manifest.write_text(xml, encoding="utf-8")
+print(f"Email magic-link login and Android deep link configured: {path}")
