@@ -23,8 +23,8 @@ jobs:
           cache: true
       - name: Check source archive
         run: |
-          test -f ride-algeria-source.zip || (echo "Upload ride_algeria_release_source_2026-11-06.zip to the repository root first." && exit 1)
-          unzip -q ride_algeria_release_source_2026-11-06.zip
+          test -f ride-algeria-source.zip || (echo "Upload ride-algeria-source.zip to the repository root first." && exit 1)
+          unzip -q ride-algeria-source.zip
       - name: Check release configuration
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
