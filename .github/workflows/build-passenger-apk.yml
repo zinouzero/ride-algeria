@@ -30,10 +30,10 @@ jobs:
         env:
           SUPABASE_URL: https://neztjanpcwevsslrizns.supabase.co
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-          MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
+          MAP_TILE_URL: https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png
         run: |
           test -n "$SUPABASE_PUBLISHABLE_KEY" || (echo "Missing repository secret SUPABASE_PUBLISHABLE_KEY" && exit 1)
-          test -n "$MAP_TILE_URL" || (echo "Missing repository secret MAP_TILE_URL" && exit 1)
+          test -n "$MAP_TILE_URL" || (echo "Map tile URL is not configured" && exit 1)
       - name: Generate Android project
         working-directory: ride_algeria_full_stack/passenger_app
         run: flutter create --platforms=android --org dz.ridealgeria .
@@ -75,8 +75,8 @@ jobs:
         env:
           SUPABASE_URL: https://neztjanpcwevsslrizns.supabase.co
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-          MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
-          MAP_ATTRIBUTION: ${{ secrets.MAP_ATTRIBUTION }}
+          MAP_TILE_URL: https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png
+          MAP_ATTRIBUTION: © OpenStreetMap contributors © CARTO
         run: flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY" --dart-define=MAP_TILE_URL="$MAP_TILE_URL" --dart-define=MAP_ATTRIBUTION="${MAP_ATTRIBUTION:-Map data provider}"
       - uses: actions/upload-artifact@v4
         with:
