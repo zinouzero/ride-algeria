@@ -1,6 +1,8 @@
 name: Build Mashwari Passenger APK
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +23,7 @@ jobs:
           cache: true
       - name: Check source archive
         run: |
-          test -f ride_algeria_release_source_2026-11-06.zip || (echo "Upload ride_algeria_release_source_2026-11-06.zip to the repository root first." && exit 1)
+          test -f ride-algeria-source.zip || (echo "Upload ride_algeria_release_source_2026-11-06.zip to the repository root first." && exit 1)
           unzip -q ride_algeria_release_source_2026-11-06.zip
       - name: Check release configuration
         env:
