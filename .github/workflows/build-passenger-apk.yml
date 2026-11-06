@@ -37,7 +37,7 @@ jobs:
       - name: Generate Android project
         working-directory: ride_algeria_full_stack/passenger_app
         run: flutter create --platforms=android --org dz.ridealgeria .
-      - name: Enable email magic-link login
+      - name: Enable persistent email/password login
         run: python3 scripts/enable_email_auth.py ride_algeria_full_stack/passenger_app/lib/main.dart ride_algeria_full_stack/passenger_app/android/app/src/main/AndroidManifest.xml
       - name: Patch Android permissions
         run: |
