@@ -28,11 +28,10 @@ jobs:
           test -f ride_algeria_full_stack/passenger_app/pubspec.yaml || (echo "Passenger Flutter project not found at expected archive path" && exit 1)
       - name: Check release configuration
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL: https://neztjanpcwevsslrizns.supabase.co
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
         run: |
-          test -n "$SUPABASE_URL" || (echo "Missing repository secret SUPABASE_URL" && exit 1)
           test -n "$SUPABASE_PUBLISHABLE_KEY" || (echo "Missing repository secret SUPABASE_PUBLISHABLE_KEY" && exit 1)
           test -n "$MAP_TILE_URL" || (echo "Missing repository secret MAP_TILE_URL" && exit 1)
       - name: Generate Android project
@@ -72,7 +71,7 @@ jobs:
       - name: Build release APK
         working-directory: ride_algeria_full_stack/passenger_app
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL: https://neztjanpcwevsslrizns.supabase.co
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
           MAP_ATTRIBUTION: ${{ secrets.MAP_ATTRIBUTION }}
