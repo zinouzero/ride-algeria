@@ -38,7 +38,27 @@ jobs:
         working-directory: ride_algeria_full_stack/passenger_app
         run: flutter create --platforms=android --org dz.ridealgeria .
       - name: Patch Android permissions
-        run: python3 ride_algeria_full_stack/scripts/patch_android_manifest.py ride_algeria_full_stack/passenger_app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path("ride_algeria_full_stack/passenger_app/android/app/src/main/AndroidManifest.xml")
+          if not manifest.exists():
+              raise SystemExit(f"Missing generated manifest: {manifest}")
+          content = manifest.read_text(encoding="utf-8")
+          permissions = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_COARSE_LOCATION",
+              "android.permission.ACCESS_FINE_LOCATION",
+              "android.permission.POST_NOTIFICATIONS",
+          ]
+          additions = "\\n".join(f'    <uses-permission android:name="{item}" />' for item in permissions)
+          if "android.permission.ACCESS_FINE_LOCATION" not in content:
+              content = content.replace("<application", additions + "\\n    <application", 1)
+          if "android:usesCleartextTraffic" not in content:
+              content = content.replace("<application", '<application android:usesCleartextTraffic="false"', 1)
+          manifest.write_text(content, encoding="utf-8")
+          print(f"Patched {manifest}")
+          PY
       - name: Resolve dependencies
         working-directory: ride_algeria_full_stack/passenger_app
         run: flutter pub get
