@@ -1,0 +1,64 @@
+name: Build Mashwari Passenger APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  passenger-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Check source archive
+        run: |
+          test -f ride_algeria_release_source_2026-11-06.zip || (echo "Upload ride_algeria_release_source_2026-11-06.zip to the repository root first." && exit 1)
+          unzip -q ride_algeria_release_source_2026-11-06.zip
+      - name: Check release configuration
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
+        run: |
+          test -n "$SUPABASE_URL" || (echo "Missing repository secret SUPABASE_URL" && exit 1)
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || (echo "Missing repository secret SUPABASE_PUBLISHABLE_KEY" && exit 1)
+          test -n "$MAP_TILE_URL" || (echo "Missing repository secret MAP_TILE_URL" && exit 1)
+      - name: Generate Android project
+        working-directory: ride_algeria_full_stack/passenger_app
+        run: flutter create --platforms=android --org dz.ridealgeria .
+      - name: Patch Android permissions
+        run: python3 ride_algeria_full_stack/scripts/patch_android_manifest.py ride_algeria_full_stack/passenger_app
+      - name: Resolve dependencies
+        working-directory: ride_algeria_full_stack/passenger_app
+        run: flutter pub get
+      - name: Analyze Dart source
+        working-directory: ride_algeria_full_stack/passenger_app
+        run: flutter analyze
+      - name: Build release APK
+        working-directory: ride_algeria_full_stack/passenger_app
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
+          MAP_ATTRIBUTION: ${{ secrets.MAP_ATTRIBUTION }}
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY" \
+            --dart-define=MAP_TILE_URL="$MAP_TILE_URL" \
+            --dart-define=MAP_ATTRIBUTION="${MAP_ATTRIBUTION:-Map data provider}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mashwari-passenger-release-apk
+          path: ride_algeria_full_stack/passenger_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
