@@ -23,8 +23,9 @@ jobs:
           cache: true
       - name: Check source archive
         run: |
-          test -f ride-algeria-source.zip || (echo "Upload ride-algeria-source.zip to the repository root first." && exit 1)
+          test -f ride-algeria-source.zip || (echo "Missing ride-algeria-source.zip in repository root" && exit 1)
           unzip -q ride-algeria-source.zip
+          test -f ride_algeria_full_stack/passenger_app/pubspec.yaml || (echo "Passenger Flutter project not found at expected archive path" && exit 1)
       - name: Check release configuration
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -42,22 +43,25 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           manifest = Path("ride_algeria_full_stack/passenger_app/android/app/src/main/AndroidManifest.xml")
-          if not manifest.exists():
-              raise SystemExit(f"Missing generated manifest: {manifest}")
+          if not manifest.is_file():
+              raise SystemExit(f"Generated Android manifest not found: {manifest}")
           content = manifest.read_text(encoding="utf-8")
-          permissions = [
+          permissions = (
               "android.permission.INTERNET",
               "android.permission.ACCESS_COARSE_LOCATION",
               "android.permission.ACCESS_FINE_LOCATION",
               "android.permission.POST_NOTIFICATIONS",
-          ]
-          additions = "\\n".join(f'    <uses-permission android:name="{item}" />' for item in permissions)
-          if "android.permission.ACCESS_FINE_LOCATION" not in content:
-              content = content.replace("<application", additions + "\\n    <application", 1)
-          if "android:usesCleartextTraffic" not in content:
-              content = content.replace("<application", '<application android:usesCleartextTraffic="false"', 1)
+          )
+          newline = chr(10)
+          missing = [p for p in permissions if f'android:name="{p}"' not in content]
+          permission_lines = newline.join(f'    <uses-permission android:name="{p}" />' for p in missing)
+          if permission_lines:
+              marker = "<application"
+              if marker not in content:
+                  raise SystemExit("Android manifest has no application element")
+              content = content.replace(marker, permission_lines + newline + "    " + marker, 1)
           manifest.write_text(content, encoding="utf-8")
-          print(f"Patched {manifest}")
+          print("Android permissions verified and patched")
           PY
       - name: Resolve dependencies
         working-directory: ride_algeria_full_stack/passenger_app
@@ -72,12 +76,7 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
           MAP_ATTRIBUTION: ${{ secrets.MAP_ATTRIBUTION }}
-        run: |
-          flutter build apk --release \\
-            --dart-define=SUPABASE_URL="$SUPABASE_URL" \\
-            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY" \\
-            --dart-define=MAP_TILE_URL="$MAP_TILE_URL" \\
-            --dart-define=MAP_ATTRIBUTION="${MAP_ATTRIBUTION:-Map data provider}"
+        run: flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY" --dart-define=MAP_TILE_URL="$MAP_TILE_URL" --dart-define=MAP_ATTRIBUTION="${MAP_ATTRIBUTION:-Map data provider}"
       - uses: actions/upload-artifact@v4
         with:
           name: mashwari-passenger-release-apk
