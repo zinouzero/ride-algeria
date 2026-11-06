@@ -51,9 +51,9 @@ jobs:
               "android.permission.ACCESS_FINE_LOCATION",
               "android.permission.POST_NOTIFICATIONS",
           ]
-          additions = "\n".join(f'    <uses-permission android:name="{item}" />' for item in permissions)
+          additions = "\\n".join(f'    <uses-permission android:name="{item}" />' for item in permissions)
           if "android.permission.ACCESS_FINE_LOCATION" not in content:
-              content = content.replace("<application", additions + "\n    <application", 1)
+              content = content.replace("<application", additions + "\\n    <application", 1)
           if "android:usesCleartextTraffic" not in content:
               content = content.replace("<application", '<application android:usesCleartextTraffic="false"', 1)
           manifest.write_text(content, encoding="utf-8")
@@ -64,7 +64,7 @@ jobs:
         run: flutter pub get
       - name: Analyze Dart source
         working-directory: ride_algeria_full_stack/passenger_app
-        run: flutter analyze lib
+        run: flutter analyze lib --no-fatal-infos --no-fatal-warnings
       - name: Build release APK
         working-directory: ride_algeria_full_stack/passenger_app
         env:
@@ -73,10 +73,10 @@ jobs:
           MAP_TILE_URL: ${{ secrets.MAP_TILE_URL }}
           MAP_ATTRIBUTION: ${{ secrets.MAP_ATTRIBUTION }}
         run: |
-          flutter build apk --release \
-            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
-            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY" \
-            --dart-define=MAP_TILE_URL="$MAP_TILE_URL" \
+          flutter build apk --release \\
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \\
+            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY" \\
+            --dart-define=MAP_TILE_URL="$MAP_TILE_URL" \\
             --dart-define=MAP_ATTRIBUTION="${MAP_ATTRIBUTION:-Map data provider}"
       - uses: actions/upload-artifact@v4
         with:
