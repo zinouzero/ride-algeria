@@ -1,64 +1,119 @@
 from pathlib import Path
+import re
 import sys
 
 if len(sys.argv) != 3:
-    raise SystemExit("Usage: enable_email_auth.py path/to/main.dart path/to/AndroidManifest.xml")
+    raise SystemExit('Usage: enable_email_auth.py path/to/main.dart path/to/AndroidManifest.xml')
 
-path = Path(sys.argv[1])
-manifest = Path(sys.argv[2])
-if not path.is_file():
-    raise SystemExit(f"Passenger app entrypoint not found: {path}")
-source = path.read_text(encoding="utf-8")
+source_path = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+if not source_path.is_file() or not manifest_path.is_file():
+    raise SystemExit('Passenger Dart source or generated Android manifest is missing')
+source = source_path.read_text(encoding='utf-8')
 source = source.replace(
-    "await Supabase.initialize(url: supabaseUrl, anonKey: supabasePublishableKey);",
-    "await Supabase.initialize(url: supabaseUrl, publishableKey: supabasePublishableKey);",
+    'await Supabase.initialize(url: supabaseUrl, anonKey: supabasePublishableKey);',
+    'await Supabase.initialize(url: supabaseUrl, publishableKey: supabasePublishableKey);',
 )
-source = source.replace("? const PhoneLoginScreen() : const BookingScreen(),", "? const EmailLoginScreen() : const BookingScreen(),")
-
-start_marker = "class PhoneLoginScreen extends StatefulWidget {"
-end_marker = "\nclass BookingScreen extends StatefulWidget"
-if start_marker in source:
-    start = source.index(start_marker)
-    end = source.index(end_marker, start)
-    email_screen = r"""class EmailLoginScreen extends StatefulWidget {
-  const EmailLoginScreen({super.key});
+source = re.sub(
+    r'class AuthGate extends StatelessWidget \{.*?\n\}',
+    '''class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
   @override
-  State<EmailLoginScreen> createState() => _EmailLoginScreenState();
+  Widget build(BuildContext context) => StreamBuilder<AuthState>(
+    stream: Supabase.instance.client.auth.onAuthStateChange,
+    builder: (context, snapshot) {
+      if (snapshot.data?.event == AuthChangeEvent.passwordRecovery) {
+        return const PasswordRecoveryScreen();
+      }
+      return Supabase.instance.client.auth.currentSession == null
+        ? const EmailPasswordAuthScreen() : const BookingScreen();
+    },
+  );
+}''', source, count=1, flags=re.S)
+
+start = source.find('class EmailLoginScreen extends StatefulWidget {')
+if start < 0:
+    start = source.find('class PhoneLoginScreen extends StatefulWidget {')
+end = source.find('\nclass BookingScreen extends StatefulWidget', start)
+if start < 0 or end < 0:
+    raise SystemExit('Could not locate the existing login screen block')
+
+screens = r'''class EmailPasswordAuthScreen extends StatefulWidget {
+  const EmailPasswordAuthScreen({super.key});
+  @override
+  State<EmailPasswordAuthScreen> createState() => _EmailPasswordAuthScreenState();
 }
 
-class _EmailLoginScreenState extends State<EmailLoginScreen> {
+class _EmailPasswordAuthScreenState extends State<EmailPasswordAuthScreen> {
   final email = TextEditingController();
-  bool sent = false, busy = false;
-  String? error;
+  final password = TextEditingController();
+  final confirmPassword = TextEditingController();
+  bool registering = false, busy = false, hidePassword = true;
+  String? error, notice;
 
   Future<void> submit() async {
     final address = email.text.trim();
-    if (address.isEmpty || !address.contains('@')) {
-      setState(() => error = 'أدخل عنوان بريد إلكتروني صحيح.');
+    final pass = password.text;
+    if (!address.contains('@') || address.length < 5) {
+      setState(() => error = 'أدخل بريداً إلكترونياً صحيحاً.');
       return;
     }
-    setState(() { busy = true; error = null; });
+    if (pass.length < 8) {
+      setState(() => error = 'كلمة المرور لازم تكون 8 أحرف على الأقل.');
+      return;
+    }
+    if (registering && pass != confirmPassword.text) {
+      setState(() => error = 'تأكيد كلمة المرور غير مطابق.');
+      return;
+    }
+    setState(() { busy = true; error = null; notice = null; });
     try {
-      await Supabase.instance.client.auth.signInWithOtp(
-        email: address,
-        emailRedirectTo: 'com.ridealgeria.mashwari://login-callback',
-      );
-      if (mounted) setState(() => sent = true);
+      final auth = Supabase.instance.client.auth;
+      if (registering) {
+        final result = await auth.signUp(
+          email: address,
+          password: pass,
+          emailRedirectTo: 'com.ridealgeria.mashwari://login-callback',
+        );
+        if (result.session == null && mounted) {
+          setState(() => notice = 'تم إنشاء الحساب. افتح رسالة التأكيد مرة واحدة، وبعدها تدخل دائماً بالبريد وكلمة المرور.');
+        }
+      } else {
+        await auth.signInWithPassword(email: address, password: pass);
+      }
     } on AuthException catch (e) {
       if (mounted) setState(() => error = e.message);
     } catch (_) {
-      if (mounted) setState(() => error = 'تعذر إرسال رابط الدخول. تحقق من الاتصال وحاول مجدداً.');
+      if (mounted) setState(() => error = 'تعذر إكمال العملية. تحقق من الإنترنت وحاول مجدداً.');
     } finally {
       if (mounted) setState(() => busy = false);
     }
   }
 
-  void changeEmail() {
-    setState(() { sent = false; error = null; });
+  Future<void> forgotPassword() async {
+    final address = email.text.trim();
+    if (!address.contains('@')) {
+      setState(() => error = 'اكتب بريدك الإلكتروني أولاً لاسترجاع كلمة المرور.');
+      return;
+    }
+    setState(() { busy = true; error = null; notice = null; });
+    try {
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        address,
+        redirectTo: 'com.ridealgeria.mashwari://login-callback',
+      );
+      if (mounted) setState(() => notice = 'أرسلنا رابط استرجاع كلمة المرور. استعمله مرة واحدة لاختيار كلمة مرور جديدة.');
+    } on AuthException catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } catch (_) {
+      if (mounted) setState(() => error = 'تعذر إرسال رابط الاسترجاع. حاول لاحقاً.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   @override
-  void dispose() { email.dispose(); super.dispose(); }
+  void dispose() { email.dispose(); password.dispose(); confirmPassword.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -71,57 +126,102 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
           const Text('مرحبا بك في مشواري', textAlign: TextAlign.center,
             style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          Text(sent ? 'أرسلنا رابط الدخول إلى بريدك. افتحه لإكمال تسجيل الدخول.' : 'سجّل ببريدك الإلكتروني للمتابعة', textAlign: TextAlign.center),
-          const SizedBox(height: 28),
-          TextField(controller: email, enabled: !sent,
-            keyboardType: TextInputType.emailAddress, textDirection: TextDirection.ltr,
-            autofillHints: const [AutofillHints.email],
+          Text(registering ? 'أنشئ حسابك مرة واحدة' : 'سجّل الدخول إلى حسابك', textAlign: TextAlign.center),
+          const SizedBox(height: 26),
+          TextField(controller: email, keyboardType: TextInputType.emailAddress,
+            textDirection: TextDirection.ltr, autofillHints: const [AutofillHints.email],
             decoration: const InputDecoration(labelText: 'البريد الإلكتروني', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email_outlined))),
-          if (sent) ...[
+          const SizedBox(height: 12),
+          TextField(controller: password, obscureText: hidePassword,
+            textDirection: TextDirection.ltr,
+            autofillHints: [registering ? AutofillHints.newPassword : AutofillHints.password],
+            decoration: InputDecoration(labelText: 'كلمة المرور', border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(onPressed: () => setState(() => hidePassword = !hidePassword), icon: Icon(hidePassword ? Icons.visibility : Icons.visibility_off)))),
+          if (registering) ...[
             const SizedBox(height: 12),
-            TextButton(onPressed: busy ? null : changeEmail, child: const Text('تغيير البريد الإلكتروني')),
+            TextField(controller: confirmPassword, obscureText: true, textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(labelText: 'تأكيد كلمة المرور', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock_reset))),
           ],
-          if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red))),
-          const SizedBox(height: 18),
-          FilledButton(onPressed: busy ? null : submit,
-            child: Text(busy ? 'يرجى الانتظار...' : sent ? 'إعادة إرسال رابط الدخول' : 'إرسال رابط الدخول إلى البريد')),
+          if (!registering) Align(alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: busy ? null : forgotPassword, child: const Text('نسيت كلمة المرور؟'))),
+          if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red))),
+          if (notice != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(notice!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.green))),
           const SizedBox(height: 14),
-          const Text('افتح رسالة مشواري في بريدك واضغط رابط تسجيل الدخول. لن تحتاج إلى SMS.', textAlign: TextAlign.center,
+          FilledButton(onPressed: busy ? null : submit,
+            child: Text(busy ? 'يرجى الانتظار...' : registering ? 'إنشاء الحساب' : 'تسجيل الدخول')),
+          const SizedBox(height: 8),
+          TextButton(onPressed: busy ? null : () => setState(() { registering = !registering; error = null; notice = null; }),
+            child: Text(registering ? 'عندي حساب بالفعل — تسجيل الدخول' : 'مستخدم جديد؟ إنشاء حساب')),
+          const SizedBox(height: 10),
+          const Text('يبقى حسابك محفوظاً على هذا الهاتف. لن تحتاج إلى رابط أو رسالة في كل مرة.', textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: Colors.black54)),
         ]),
       ),
     ))),
   );
 }
-"""
-    source = source[:start] + email_screen + source[end:]
-elif "class EmailLoginScreen extends StatefulWidget {" not in source:
-    raise SystemExit("Could not find existing phone login screen to replace")
 
-source = source.replace(
-    "DropdownButtonFormField<String>(value:category,",
-    "DropdownButtonFormField<String>(initialValue:category,",
-)
-if "const PhoneLoginScreen()" in source or "signInWithOtp(phone:" in source:
-    raise SystemExit("Phone login references remain after patch")
-if "emailRedirectTo:" not in source or "com.ridealgeria.mashwari://login-callback" not in source:
-    raise SystemExit("Email magic-link implementation verification failed")
-path.write_text(source, encoding="utf-8")
+class PasswordRecoveryScreen extends StatefulWidget {
+  const PasswordRecoveryScreen({super.key});
+  @override
+  State<PasswordRecoveryScreen> createState() => _PasswordRecoveryScreenState();
+}
 
-if not manifest.is_file():
-    raise SystemExit(f"Generated Android manifest not found: {manifest}")
-xml = manifest.read_text(encoding="utf-8")
-intent = """
+class _PasswordRecoveryScreenState extends State<PasswordRecoveryScreen> {
+  final password = TextEditingController();
+  final confirm = TextEditingController();
+  bool busy = false;
+  String? error;
+  Future<void> save() async {
+    if (password.text.length < 8 || password.text != confirm.text) {
+      setState(() => error = 'تأكد من تطابق كلمتي المرور وأنهما 8 أحرف على الأقل.');
+      return;
+    }
+    setState(() { busy = true; error = null; });
+    try {
+      await Supabase.instance.client.auth.updateUser(UserAttributes(password: password.text));
+    } on AuthException catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } catch (_) {
+      if (mounted) setState(() => error = 'تعذر تحديث كلمة المرور. حاول مجدداً.');
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+  @override
+  void dispose() { password.dispose(); confirm.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => Scaffold(body: SafeArea(child: Center(child: SingleChildScrollView(
+    padding: const EdgeInsets.all(24), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('اختيار كلمة مرور جديدة', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 24),
+      TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'كلمة المرور الجديدة', border: OutlineInputBorder())),
+      const SizedBox(height: 12),
+      TextField(controller: confirm, obscureText: true, decoration: const InputDecoration(labelText: 'تأكيد كلمة المرور', border: OutlineInputBorder())),
+      if (error != null) Padding(padding: const EdgeInsets.all(8), child: Text(error!, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center)),
+      const SizedBox(height: 16), FilledButton(onPressed: busy ? null : save, child: Text(busy ? 'يرجى الانتظار...' : 'حفظ كلمة المرور')),
+    ]),
+  ))));
+}
+'''
+source = source[:start] + screens + source[end:]
+source = source.replace('DropdownButtonFormField<String>(value:category,', 'DropdownButtonFormField<String>(initialValue:category,')
+if 'const PhoneLoginScreen()' in source or 'signInWithOtp(' in source:
+    raise SystemExit('Old phone/email OTP login reference remains')
+if 'signInWithPassword(' not in source or 'auth.signUp(' not in source or 'AuthChangeEvent.passwordRecovery' not in source:
+    raise SystemExit('Password auth verification failed')
+source_path.write_text(source, encoding='utf-8')
+
+xml = manifest_path.read_text(encoding='utf-8')
+intent = '''
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="com.ridealgeria.mashwari" android:host="login-callback" />
             </intent-filter>
-"""
-if "com.ridealgeria.mashwari" not in xml:
-    if "</activity>" not in xml:
-        raise SystemExit("Generated Android manifest has no activity element")
-    xml = xml.replace("</activity>", intent + "        </activity>", 1)
-manifest.write_text(xml, encoding="utf-8")
-print(f"Email magic-link login and Android deep link configured: {path}")
+'''
+if 'com.ridealgeria.mashwari' not in xml:
+    if '</activity>' not in xml:
+        raise SystemExit('Generated Android manifest has no activity element')
+    xml = xml.replace('</activity>', intent + '        </activity>', 1)
+manifest_path.write_text(xml, encoding='utf-8')
+print('Email/password authentication, password recovery, and persisted Supabase session configured.')
